@@ -229,6 +229,8 @@ header{background:#1e293b;border-bottom:1px solid #0f172a;padding:14px 24px;disp
   .pv-time-night{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
 }
 </style>
+
+<script>if(!localStorage.getItem('gh_horario_token')){localStorage.setItem('gh_horario_token','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');}</script>
 </head>
 <body>
 
@@ -1376,7 +1378,7 @@ var GH_USER  = 'danielhtk10-cmd';
 var GH_REPO  = 'Horario-semanal';
 var GH_FILE  = 'datos_horario.json';
 var GH_SHA   = null;
-var GH_TOKEN = localStorage.getItem('gh_horario_token') || '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';
+var GH_TOKEN = localStorage.getItem('gh_horario_token') || '';
 
 function mostrarModalToken(){
   var m=document.getElementById('modal-token');
