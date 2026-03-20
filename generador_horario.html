@@ -412,7 +412,7 @@ header{background:#1e293b;border-bottom:1px solid #0f172a;padding:14px 24px;disp
       <div id="pvContent"></div>
     </div>
   </div>
-</div> style="display:none" onclick="if(event.target===this)closeM('mAddOt')">
+<div class="modal-overlay" id="mAddOt" style="display:none" onclick="if(event.target===this)closeM('mAddOt')">
   <div class="modal">
     <div class="mh"><h3>Agregar OT</h3><button class="mc" onclick="closeM('mAddOt')">✕</button></div>
     <div class="mb">
@@ -510,12 +510,12 @@ var TSTORES = {
 var TEXCEL = {WILLY:'FFFFD966',YERSON:'FFE2EFDA',JOSE:'FFDAE3F3',JESUS:'FFFCE4D6',JHON:'FFEDEDED'};
 
 var allOTs=[], filtOTs=[], assignedIds=new Set(), sched={};
-var curTech='WILLY', pendTech='', pendDay='';
+var curTech='WILLY', pendTech='', pendDay='', pendTurno='day';
 
 function initSched(){
   TECHS.forEach(function(t){
     sched[t]={};
-    DKEYS.forEach(function(d){ sched[t][d]={store:'',ots:[],rest:false,t1:'9:00',t2:'17:45'}; });
+    DKEYS.forEach(function(d){ sched[t][d]={store:'',ots:[],rest:false,t1:'9:00',t2:'17:45',night:{active:false,store:'',ots:[],t1:'20:00',t2:'23:59'}}; });
   });
 }
 initSched();
@@ -699,6 +699,53 @@ function selTech(tech,el){
   el.classList.add('active');
 }
 
+function renderTurnBlock(tech,day,cell,turno){
+  // turno: 'day' o 'night'
+  var isNight=(turno==='night');
+  var t1=isNight?cell.night.t1:cell.t1;
+  var t2=isNight?cell.night.t2:cell.t2;
+  var store=isNight?cell.night.store:cell.store;
+  var ots=isNight?cell.night.ots:cell.ots;
+  var overnight=isOvernightShift(t1,t2);
+  var blockStyle=isNight?'border-top:1px dashed rgba(99,102,241,.3);margin-top:6px;padding-top:6px;':'';
+  var html='<div style="'+blockStyle+'">';
+  if(isNight){
+    html+='<div style="font-size:9px;font-weight:700;color:#818cf8;letter-spacing:.5px;margin-bottom:3px">🌙 TURNO NOCHE</div>';
+  }
+  html+='<div class="hours-bar'+(overnight?' hours-bar-night':'')+'">';
+  html+='<input class="hi" type="text" value="'+t1+'" onchange="setTurnoTime(\''+tech+'\',\''+day+'\',\''+turno+'\',\'t1\',this.value);renderSched();" title="Hora inicio">';
+  html+='<span class="hs">–</span>';
+  html+='<input class="hi" type="text" value="'+t2+'" onchange="setTurnoTime(\''+tech+'\',\''+day+'\',\''+turno+'\',\'t2\',this.value);renderSched();" title="Hora fin">';
+  if(overnight)html+='<span title="Turno nocturno: cruza medianoche" style="font-size:11px;margin-left:2px;cursor:default">🌙</span>';
+  html+='</div>';
+  if(store)html+='<div class="store-tag">'+store+'</div>';
+  html+='<select class="store-selector" onchange="setTurnoStore(\''+tech+'\',\''+day+'\',\''+turno+'\',this.value)">';
+  html+='<option value="">— Tienda —</option>';
+  allOTs.length&&[...new Set(allOTs.map(function(o){return o.store;}))].sort().forEach(function(s){
+    html+='<option value="'+s+'"'+(s===store?' selected':'')+'>'+s+'</option>';
+  });
+  html+='</select>';
+  ots.forEach(function(ot,i){
+    var prioIcon='';
+    if(ot.priority==='EMERGENCIA')prioIcon='🔴';
+    else if(ot.priority==='ALTA')prioIcon='🟠';
+    else if(ot.priority==='BAJA')prioIcon='⚪';
+    var manualTag=ot.manual?'<span style="font-size:8px;background:rgba(99,102,241,.18);color:#6366f1;padding:1px 4px;border-radius:3px;font-weight:700;margin-left:2px">MANUAL</span>':'';
+    html+='<div class="ot-item">';
+    html+='<span class="otn">'+(prioIcon?prioIcon+' ':'')+(ot.id?'#'+ot.id:'✏️')+'</span>';
+    html+='<span class="otd">'+ot.desc+manualTag+'</span>';
+    html+='<span class="otr" onclick="removeTurnoOT(\''+tech+'\',\''+day+'\',\''+turno+'\','+i+')">✕</span>';
+    html+='</div>';
+  });
+  html+='<button class="add-btn" onclick="openAddOT(\''+tech+'\',\''+day+'\',\''+turno+'\')">+ agregar OT del Excel</button>';
+  html+='<button class="add-btn add-btn-new" onclick="openManualOTDirect(\''+tech+'\',\''+day+'\',\''+turno+'\')">✏️ nueva OT manual</button>';
+  if(isNight){
+    html+='<button class="rest-toggle" style="color:#f87171" onclick="toggleNight(\''+tech+'\',\''+day+'\')">✕ Quitar turno noche</button>';
+  }
+  html+='</div>';
+  return html;
+}
+
 function renderSched(){
   var tbody=document.getElementById('schedBody');
   var html='';
@@ -714,34 +761,14 @@ function renderSched(){
         html+='<div class="rest-badge">DESCANSO</div>';
         html+='<button class="rest-toggle" onclick="toggleRest(\''+tech+'\',\''+day+'\')">↩ Quitar descanso</button>';
       }else{
-        var overnight=isOvernightShift(cell.t1,cell.t2);
-        html+='<div class="hours-bar'+(overnight?' hours-bar-night':'')+'">';
-        html+='<input class="hi" type="text" value="'+cell.t1+'" onchange="setTime(\''+tech+'\',\''+day+'\',\'t1\',this.value);renderSched();" title="Hora inicio">';
-        html+='<span class="hs">–</span>';
-        html+='<input class="hi" type="text" value="'+cell.t2+'" onchange="setTime(\''+tech+'\',\''+day+'\',\'t2\',this.value);renderSched();" title="Hora fin">';
-        if(overnight)html+='<span title="Turno nocturno: cruza medianoche" style="font-size:11px;margin-left:2px;cursor:default">🌙</span>';
-        html+='</div>';
-        if(cell.store)html+='<div class="store-tag">'+cell.store+'</div>';
-        html+='<select class="store-selector" onchange="setStore(\''+tech+'\',\''+day+'\',this.value)">';
-        html+='<option value="">— Tienda —</option>';
-        allOTs.length&&[...new Set(allOTs.map(function(o){return o.store;}))].sort().forEach(function(s){
-          html+='<option value="'+s+'"'+(s===cell.store?' selected':'')+'>'+s+'</option>';
-        });
-        html+='</select>';
-        cell.ots.forEach(function(ot,i){
-          var prioIcon='';
-          if(ot.priority==='EMERGENCIA')prioIcon='🔴';
-          else if(ot.priority==='ALTA')prioIcon='🟠';
-          else if(ot.priority==='BAJA')prioIcon='⚪';
-          var manualTag=ot.manual?'<span style="font-size:8px;background:rgba(99,102,241,.18);color:#6366f1;padding:1px 4px;border-radius:3px;font-weight:700;margin-left:2px">MANUAL</span>':'';
-          html+='<div class="ot-item">';
-          html+='<span class="otn">'+(prioIcon?prioIcon+' ':'')+(ot.id?'#'+ot.id:'✏️')+'</span>';
-          html+='<span class="otd">'+ot.desc+manualTag+'</span>';
-          html+='<span class="otr" onclick="removeOT(\''+tech+'\',\''+day+'\','+i+')">✕</span>';
-          html+='</div>';
-        });
-        html+='<button class="add-btn" onclick="openAddOT(\''+tech+'\',\''+day+'\')">+ agregar OT del Excel</button>';
-        html+='<button class="add-btn add-btn-new" onclick="openManualOTDirect(\''+tech+'\',\''+day+'\')">✏️ nueva OT manual</button>';
+        // TURNO DIA
+        html+=renderTurnBlock(tech,day,cell,'day');
+        // TURNO NOCHE (si activo)
+        if(cell.night&&cell.night.active){
+          html+=renderTurnBlock(tech,day,cell,'night');
+        }else{
+          html+='<button class="add-btn" style="margin-top:6px;border-color:rgba(99,102,241,.4);color:#818cf8" onclick="toggleNight(\''+tech+'\',\''+day+'\')">+ turno noche</button>';
+        }
         html+='<button class="rest-toggle" onclick="toggleRest(\''+tech+'\',\''+day+'\')">🌙 Descanso</button>';
       }
       html+='</div></td>';
@@ -753,6 +780,31 @@ function renderSched(){
 
 function setTime(tech,day,which,val){sched[tech][day][which]=val;}
 function setStore(tech,day,store){sched[tech][day].store=store;renderSched();}
+function setTurnoTime(tech,day,turno,which,val){
+  if(turno==='night'){sched[tech][day].night[which]=val;}
+  else{sched[tech][day][which]=val;}
+}
+function setTurnoStore(tech,day,turno,store){
+  if(turno==='night'){sched[tech][day].night.store=store;}
+  else{sched[tech][day].store=store;}
+  renderSched();
+}
+function toggleNight(tech,day){
+  if(!sched[tech][day].night)sched[tech][day].night={active:false,store:'',ots:[],t1:'20:00',t2:'23:59'};
+  sched[tech][day].night.active=!sched[tech][day].night.active;
+  if(!sched[tech][day].night.active){
+    sched[tech][day].night.ots.forEach(function(o){if(o.id)assignedIds.delete(o.id);});
+    sched[tech][day].night.ots=[];sched[tech][day].night.store='';
+  }
+  renderSched();
+}
+function removeTurnoOT(tech,day,turno,i){
+  var ots=(turno==='night')?sched[tech][day].night.ots:sched[tech][day].ots;
+  var ot=ots[i];
+  if(ot&&ot.id)assignedIds.delete(ot.id);
+  ots.splice(i,1);
+  renderSched();
+}
 function toggleRest(tech,day){
   sched[tech][day].rest=!sched[tech][day].rest;
   if(sched[tech][day].rest){
@@ -768,12 +820,12 @@ function removeOT(tech,day,i){
   updateStats();renderSched();filterOTs();
 }
 
-function openAddOT(tech,day){
-  pendTech=tech;pendDay=day;
+function openAddOT(tech,day,turno){
+  pendTech=tech;pendDay=day;pendTurno=turno||'day';
   var dayNames={mon:'Lunes',tue:'Martes',wed:'Miércoles',thu:'Jueves',fri:'Viernes',sat:'Sábado',sun:'Domingo'};
   document.getElementById('mTech').textContent=tech;
   document.getElementById('mDay').textContent=dayNames[day];
-  var store=sched[tech][day].store;
+  var store=(pendTurno==='night')?sched[tech][day].night.store:sched[tech][day].store;
   var avail=allOTs.filter(function(o){return !assignedIds.has(o.id)&&(!store||o.store===store);});
   var list=document.getElementById('otSelList');
   if(!avail.length){
@@ -803,8 +855,9 @@ function openAddOT(tech,day){
 function assignFromModal(otId){
   var ot=allOTs.find(function(o){return o.id===otId;});
   if(!ot)return;
-  if(!sched[pendTech][pendDay].store)sched[pendTech][pendDay].store=ot.store;
-  sched[pendTech][pendDay].ots.push({id:ot.id,desc:ot.desc});
+  var target=(pendTurno==='night')?sched[pendTech][pendDay].night:sched[pendTech][pendDay];
+  if(!target.store)target.store=ot.store;
+  target.ots.push({id:ot.id,desc:ot.desc});
   assignedIds.add(otId);closeM('mAddOt');
   updateStats();renderSched();filterOTs();showToast('✅ OT #'+otId+' asignada');
 }
@@ -813,14 +866,14 @@ function openManualOT(){
   closeM('mAddOt');
   openManualOTDirect(pendTech, pendDay);
 }
-function openManualOTDirect(tech, day){
-  pendTech=tech; pendDay=day;
+function openManualOTDirect(tech, day, turno){
+  pendTech=tech; pendDay=day; pendTurno=turno||'day';
   var dayNames={mon:'Lunes',tue:'Martes',wed:'Miércoles',thu:'Jueves',fri:'Viernes',sat:'Sábado',sun:'Domingo'};
   document.getElementById('manNum').value='';
   document.getElementById('manDesc').value='';
   document.getElementById('manPrio').value='MEDIA';
   // Pre-fill store from cell
-  var cellStore=sched[tech][day].store||'';
+  var cellStore=((turno||'day')==='night'?sched[tech][day].night.store:sched[tech][day].store)||'';
   document.getElementById('manStore').value=cellStore;
   // Populate store datalist with known stores
   var stores=[...new Set(allOTs.map(function(o){return o.store;}))].sort();
@@ -842,8 +895,9 @@ function confirmManual(){
   var prio=document.getElementById('manPrio').value;
   if(!desc){showToast('⚠️ Ingresa una descripción');return;}
   // Set store on cell if not already set
-  if(store&&!sched[pendTech][pendDay].store)sched[pendTech][pendDay].store=store;
-  sched[pendTech][pendDay].ots.push({id:num,desc:desc,store:store,priority:prio,manual:true});
+  var ctarget=(pendTurno==='night')?sched[pendTech][pendDay].night:sched[pendTech][pendDay];
+  if(store&&!ctarget.store)ctarget.store=store;
+  ctarget.ots.push({id:num,desc:desc,store:store,priority:prio,manual:true});
   if(num)assignedIds.add(num);
   closeM('mManual');
   updateStats();renderSched();showToast('✅ OT manual agregada a '+pendTech);
@@ -878,15 +932,37 @@ function runAutoAssign(){
   unmatched.forEach(function(ot,i){byTech[TECHS[i%TECHS.length]].push(ot);});
   var total=0;
   TECHS.forEach(function(tech){
-    var ots=byTech[tech],oi=0;
-    DKEYS.forEach(function(day){
-      if(sched[tech][day].rest||oi>=ots.length)return;
-      var toAdd=Math.min(max-sched[tech][day].ots.length,ots.length-oi);
-      for(var i=0;i<toAdd;i++){
-        var ot=ots[oi++];
-        if(!sched[tech][day].store)sched[tech][day].store=ot.store;
-        sched[tech][day].ots.push({id:ot.id,desc:ot.desc});
-        assignedIds.add(ot.id);total++;
+    var ots=byTech[tech];
+    // Agrupar OTs por tienda para distribuir un día por tienda
+    var byStore={};
+    ots.forEach(function(ot){
+      var s=ot.store||'__sin_tienda__';
+      if(!byStore[s])byStore[s]=[];
+      byStore[s].push(ot);
+    });
+    var storeList=Object.keys(byStore);
+    var dayIdx=0;
+    storeList.forEach(function(store){
+      var storeOTs=byStore[store];
+      var oi=0;
+      // Buscar un día libre para esta tienda
+      while(oi<storeOTs.length){
+        // Avanzar al siguiente día disponible
+        while(dayIdx<DKEYS.length&&sched[tech][DKEYS[dayIdx]].rest)dayIdx++;
+        if(dayIdx>=DKEYS.length)return;
+        var day=DKEYS[dayIdx];
+        var cell=sched[tech][day];
+        // Si el día ya tiene otra tienda asignada, saltar al siguiente día
+        if(cell.store&&cell.store!==store){dayIdx++;return;}
+        var toAdd=Math.min(max-cell.ots.length,storeOTs.length-oi);
+        if(toAdd<=0){dayIdx++;return;}
+        for(var i=0;i<toAdd;i++){
+          var ot=storeOTs[oi++];
+          if(!cell.store)cell.store=store==='__sin_tienda__'?'':store;
+          cell.ots.push({id:ot.id,desc:ot.desc,priority:ot.priority});
+          assignedIds.add(ot.id);total++;
+        }
+        if(cell.ots.length>=max)dayIdx++;
       }
     });
   });
@@ -1278,7 +1354,7 @@ function renderPresent(){
     var color=TCOLORS[tech];
     var totalTechOTs=0;
     var workDays=0;
-    DKEYS.forEach(function(d){if(!sched[tech][d].rest){workDays++;totalTechOTs+=sched[tech][d].ots.length;}});
+    DKEYS.forEach(function(d){if(!sched[tech][d].rest){workDays++;totalTechOTs+=sched[tech][d].ots.length;if(sched[tech][d].night&&sched[tech][d].night.active)totalTechOTs+=sched[tech][d].night.ots.length;}});
 
     html+='<div class="pv-tech-block">';
     // Tech header
@@ -1307,16 +1383,14 @@ function renderPresent(){
       if(cell.rest){
         html+='<div class="pv-rest"><div class="pv-rest-icon">😴</div><div class="pv-rest-label">Descanso</div></div>';
       } else {
-        var isNight=isOvernightShift(cell.t1,cell.t2);
-        // 1) Tienda
+        var isNightShift=isOvernightShift(cell.t1,cell.t2);
+        // ── TURNO DÍA ──
         if(cell.store){
           html+='<div class="pv-store-name">📍 '+cell.store+'</div>';
         }
-        // 2) Hora (debajo de la tienda)
-        html+='<div class="pv-time-chip'+(isNight?' pv-time-night':'')+'">';
-        html+=cell.t1+' – '+cell.t2+(isNight?' 🌙':'');
+        html+='<div class="pv-time-chip'+(isNightShift?' pv-time-night':'')+'">';
+        html+=cell.t1+' – '+cell.t2+(isNightShift?' 🌙':'');
         html+='</div>';
-        // 3) OTs
         if(cell.ots.length){
           html+='<div class="pv-ot-list">';
           cell.ots.forEach(function(ot){
@@ -1331,6 +1405,31 @@ function renderPresent(){
           html+='</div>';
         } else {
           html+='<div class="pv-no-ots">Sin OTs</div>';
+        }
+        // ── TURNO NOCHE ──
+        if(cell.night&&cell.night.active){
+          html+='<div style="margin-top:7px;padding-top:7px;border-top:1px dashed rgba(99,102,241,.35)">';
+          html+='<div style="font-size:8px;font-weight:800;color:#818cf8;letter-spacing:.6px;margin-bottom:4px">🌙 TURNO NOCHE</div>';
+          if(cell.night.store){
+            html+='<div class="pv-store-name" style="background:rgba(99,102,241,.1);color:#818cf8;border:1px solid rgba(99,102,241,.2)">📍 '+cell.night.store+'</div>';
+          }
+          html+='<div class="pv-time-chip pv-time-night">'+cell.night.t1+' – '+cell.night.t2+' 🌙</div>';
+          if(cell.night.ots&&cell.night.ots.length){
+            html+='<div class="pv-ot-list">';
+            cell.night.ots.forEach(function(ot){
+              var prioIcon='';
+              if(ot.priority==='EMERGENCIA')prioIcon='🔴 ';
+              else if(ot.priority==='ALTA')prioIcon='🟠 ';
+              html+='<div class="pv-ot">';
+              html+='<span class="pv-ot-num" style="color:#818cf8">'+prioIcon+(ot.id?'#'+ot.id:'OT')+'</span>';
+              html+='<span class="pv-ot-desc">'+ot.desc+(ot.manual?' <span class="pv-ot-manual">MANUAL</span>':'')+'</span>';
+              html+='</div>';
+            });
+            html+='</div>';
+          } else {
+            html+='<div class="pv-no-ots">Sin OTs noche</div>';
+          }
+          html+='</div>';
         }
       }
       html+='</div>'; // pv-day
@@ -1424,6 +1523,8 @@ function cargarDesdeGitHub(){
         DKEYS.forEach(function(d){
           if(decoded.sched[t]&&decoded.sched[t][d]){
             sched[t][d]=decoded.sched[t][d];
+            // Asegurar que night existe para compatibilidad
+            if(!sched[t][d].night)sched[t][d].night={active:false,store:'',ots:[],t1:'20:00',t2:'23:59'};
           }
         });
       });
